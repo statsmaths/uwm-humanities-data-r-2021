@@ -31,7 +31,7 @@ after the workshop to follow these steps.
 
 - [R Programming language](https://www.r-project.org/)
 - [RStudio](https://rstudio.com/products/rstudio/download/#download)
-- course notebooks and datasets: click the green "Clone" button below and unzip the file
+- [course notebooks and datasets](https://github.com/statsmaths/uwm-humanities-data-r-2021/raw/main/uwm-humanities-data-r-2021.zip)
 
 ## Schedule
 
