@@ -1,0 +1,213 @@
+---
+title: "Notebook 05: Spatial Analysis"
+author: "Taylor Arnold and Lauren Tilton"
+---
+
+```{r, message = FALSE}
+library(readr)               # read and write in the datasets
+library(ggplot2)             # plotting library
+library(dplyr)               # apply database-like commands
+library(USAboundaries)       # contains U.S. State geographic data
+library(sf)                  # spatial data
+source("src/funs.R")         # custom helper functions
+
+theme_set(theme_minimal())   # set a minimal plot as the default
+options(
+  dplyr.summarise.inform = FALSE,    # some additional options to reduce the
+  readr.show_col_types = FALSE       # noise of some of the functions
+)
+```
+
+## Spatial Data
+
+### State Shape Files
+
+For this final notebook we return to the spatial analysis of the FSA-OWI dataset.
+Let's read in the data one more time and add a new column containing the state
+abbreviation.
+
+```{r, message = FALSE}
+photos <- read_csv("data/photo_metadata_20200707.csv") %>%      # load the photos data
+  left_join(state_codes, by = c("state" = "state_name")) %>%    # add state postal codes
+  mutate(
+    state_abbr = if_else(
+      state == "Virgin Islands of the U.S.", "VI", state_abbr)  # manually fix Virgin Islands code
+    )
+```
+
+The USAboundaries loads a dataset called states_contemporary_lores that contains spatial
+data about all of the U.S. states. We can plot this using ggplot2 using the following
+code:
+
+```{r}
+st_crs(states_contemporary_lores) <- "EPSG:4326"      # set the correct projection
+
+states_contemporary_lores %>%                         # state shapes, comes from USAboundaries
+  filter(!(state_abbr %in% c("AK", "HI", "PR"))) %>%  # filter out Alaska, Hawaii, and Puerto Rico
+  ggplot() +                                          # start the plot
+     geom_sf()                                        # this special plot type shows the spatial shapes
+```
+
+The benefit of using this object is that we can apply a cartegraphic transformation
+of the dataset. For instance, let's project the data using the Albers Equal Area
+projection:
+
+```{r}
+states_contemporary_lores %>%                         # start with the states shape files
+  st_transform(3085) %>%                              # transform to Albers Equal Area
+  filter(!(state_abbr %in% c("AK", "HI", "PR"))) %>%  # remove Alaska, Hawaii, Puerto Rico
+  ggplot() +                                          # start the plot
+    geom_sf()                                         # plot the regions
+```
+
+This is a much better more accurate representation of the continental U.S. than
+using just latitude and logitude.
+
+### Spatial Points
+
+We can take out photos data and create a spatial dataset using the function st_as_sf
+and using their latitude and longitude.
+
+```{r}
+photo_pt <- photos %>%                              # create photo_pt from photos
+  filter(!is.na(lat), !is.na(lon)) %>%              # removing missing latitude and longitude
+  group_by(lon, lat, state_abbr, place) %>%         # group by location
+  summarize(n = n()) %>%                            # count photos in each location
+  ungroup() %>%                                     # remove grouping
+  st_as_sf(coords = c("lon", "lat"), crs = 4326)    # convert to a spatial object; declare 4326 projection (lat/lon)
+```
+
+Now, let's put these two datasets together. We will do a spatial join of the
+points with the states, and color the states according to how many photos are
+taken in each state.
+
+```{r, message=FALSE}
+states_contemporary_lores %>%                            # start with state shapes
+  st_join(photo_pt, suffix = c("", "_y")) %>%            # do a spatial join with the points
+  group_by(state_abbr) %>%                               # group by state
+  summarize(n = sum(n)) %>%                              # how many images in each state ?
+  st_transform(3085) %>%                                 # transform to Albers Equal Area
+  filter(!(state_abbr %in% c("AK", "HI", "PR"))) %>%     # remove Alaska, Hawaii, Puerto Rico
+  ggplot() +                                             # start the plot
+    geom_sf(aes(fill = n)) +                             # plot the points; color by counts
+    scale_fill_viridis_b(n.breaks = 8)                   # pick the color scale; 8 buckets
+```
+
+We can (and do on our current site) extend this to county level maps to see a
+more fine-grain description of where photos are located.
+
+### Scatter Plot
+
+By projecting both the photo and states data, we can plot both in a projected
+set of coordinates to make a better version of the plot that we made in
+Notebook02. For example, start by projecting all of the data into the
+Albers Equal Area projection.
+
+```{r, warning=FALSE}
+photos_proj <- photo_pt %>%                             # create photos_proj from photo_pt
+  st_transform(3085) %>%                                # project the photos, Albers Equal Area
+  filter(!(state_abbr %in% c("AK", "HI", "PR", "VI")))  # Remove Alaska, Hawaii, Puerto Rico, and Virgin Islands
+
+states_proj <- states_contemporary_lores %>%            # create states_proj from states_contemporary_lores
+  st_transform(3085) %>%                                # project the photos, Albers Equal Area
+  filter(!(state_abbr %in% c("AK", "HI", "PR", "VI")))  # Remove Alaska, Hawaii, Puerto Rico, and Virgin Islands
+```
+
+Now plotting them together shows the spatial spread of the collection across
+the country:
+
+```{r}
+ggplot() +                                          # start the plot
+  geom_sf(fill = "white", data = states_proj) +     # fill in states with white color
+  geom_sf(
+    aes(size = n),                                  # plot points, making size prop to count
+    color = "olivedrab",                            # color dark green
+    alpha = 0.3,                                    # make points transparent
+    show.legend = FALSE,                            # do not clutter with a legend
+    data = photos_proj                              # use photos_proj data (the points)
+  ) +
+  scale_size_area(max_size = 20)                    # set area proportional to size
+```
+
+### State Plots
+
+We can repeat this process for a single state by choosing an appropriate projection.
+For example, let's pick photos from Wisconsin. Here is the same plot from just
+the state:
+
+```{r}
+photos_proj <- photo_pt %>%                   # create photos_proj from photo_pt
+  st_transform(2289) %>%                      # project the photos to Wisconsin
+  filter(state_abbr == "WI")                  # select only Wisconsin images
+
+states_proj <- states_contemporary_lores %>%  # create states_proj from states_contemporary_lores
+  st_transform(2289) %>%                      # project the states to Wisconsin
+  filter(state_abbr == "WI")                  # select only Wisconsin images
+
+ggplot() +                                          # start the plot
+  geom_sf(fill = "white", data = states_proj) +     # fill in states with white color
+  geom_sf(
+    aes(size = n),                                  # plot points, making size prop to count
+    color = "olivedrab",                            # color dark green
+    alpha = 0.3,                                    # make points transparent
+    show.legend = FALSE,                            # do not cluter with a legend
+    data = photos_proj                              # use photos_proj data (the points)
+  ) +
+  scale_size_area(max_size = 20)                    # set area proportional to size
+```
+
+At this zoomed in level, we can even include labels of the places on the map:
+
+```{r}
+ggplot() +                                            # start the plot
+  geom_sf(fill = "white", data = states_proj) +       # fill in states with white color
+  geom_sf(
+    aes(size = n),                                    # plot points, making size prop to count
+    color = "olivedrab",                              # color dark green
+    alpha = 0.3,                                      # make points transparent
+    show.legend = FALSE,                              # do not cluter with a legend
+    data = photos_proj                                # use photos_proj data (the points)
+  ) +
+  geom_sf_text(
+    aes(label = place), size = 3, data = photos_proj  # add labels
+  ) +
+  scale_size_area(max_size = 20)                      # set area proportional to size
+```
+
+To use a different state, we just need to pick the correct projection and filter
+the data accordingly. For example, here is Puerto Rico:
+
+```{r}
+photos_proj <- photo_pt %>%                   # create photos_proj from photo_pt
+  st_transform(2866) %>%                      # project the photos to Puerto Rico
+  filter(state_abbr == "PR")                  # select only Puerto Rico images
+
+states_proj <- states_contemporary_lores %>%  # create states_proj from states_contemporary_lores
+  st_transform(2866) %>%                      # project the stat"es to Puerto Rico
+  filter(state_abbr == "PR")                  # select only Puerto Rico images
+
+ggplot() +                                            # start the plot
+  geom_sf(fill = "white", data = states_proj) +       # fill in states with white color
+  geom_sf(
+    aes(size = n),                                    # plot points, making size prop to count
+    color = "olivedrab",                              # color dark green
+    alpha = 0.3,                                      # make points transparent
+    show.legend = FALSE,                              # do not cluter with a legend
+    data = photos_proj                                # use photos_proj data (the points)
+  ) +
+  geom_sf_text(
+    aes(label = place), size = 3, data = photos_proj  # add labels
+  ) +
+  scale_size_area(max_size = 20)                      # set area proportional to size
+```
+
+### On Your Own
+
+Pick another state and repeat the process above using an appropriate projection.
+
+```{r}
+
+```
+
+Hawaii and Alaska are good choices to show the benefits of picking a good projection for
+your data.

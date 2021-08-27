@@ -1,0 +1,23 @@
+---
+title: "Notebook 00: Setup"
+author: "Taylor Arnold and Lauren Tilton"
+---
+
+## Setup
+
+This notebook installs all of the packaged needed for the other notebooks. If running the
+code on RStudio Cloud, in theory you should not need to re-run this. On your own machine,
+this is needed before proceeding through the other notebooks. See Notebook01 for information
+about how to run R code and how code is structure into packages.
+
+```{r}
+install.packages(
+  pkgs = c(
+    "readr", "ggplot2", "stringi", "forcats", "ggrepel", "tidyr",
+    "Hmisc", "cleanNLP", "devtools", "ggimg", "lubridate", "cleanNLP",
+    "igraph", "USAboundaries", "sf"
+  ),
+  repos = "https://cran.rstudio.com/",
+  quiet = FALSE
+)
+```

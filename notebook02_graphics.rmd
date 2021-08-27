@@ -1,0 +1,291 @@
+---
+title: "Notebook 02: Graphics in R"
+author: "Taylor Arnold and Lauren Tilton"
+---
+
+We need to reload the packages in each notebook. These are usually
+included at the start of the notebook.
+
+```{r, message = FALSE}
+library(readr)               # read and write in the datasets
+library(ggplot2)             # plotting library
+library(dplyr)               # apply database-like commands
+library(forcats)             # manipulate categorical variables
+library(lubridate)           # work with dates and times
+
+theme_set(theme_minimal())   # set a minimal plot as the default
+options(
+  dplyr.summarise.inform = FALSE,    # some additional options to reduce the
+  readr.show_col_types = FALSE       # noise of some of the functions
+)
+```
+
+## Data Visualization
+
+### Bar Plots
+
+For this notebook we will be using the photographs data. You will need to re-read
+the data into R:
+
+```{r, message = FALSE}
+photos <- read_csv("data/photo_metadata_20200707.csv")    # read in the dataset
+```
+
+To start, we will build a bar plot showing how many photographs are taken in
+each year. Try not too get to worried about the specific code syntax at this
+point; instead, focus on what information is contained in the plot.
+
+```{r, warning=FALSE}
+photos %>%                  # built a plot from the photos data
+  ggplot(aes(x = year)) +   # this says: start a plot with 'year' on the x-axis
+    geom_bar()              # what kind of plot? a bar plot!
+```
+
+So far, so good. We can modify this code to instead count the number of photographs
+taken by each photographer. This involves changing the just the variable mapped to
+the x-axis.
+
+```{r}
+photos %>%                          # built a plot from the photos data
+  ggplot(aes(x = photographer)) +   # this says: start a plot with 'photographer' on the x-axis
+    geom_bar()                      # what kind of plot? a bar plot!
+```
+
+Unfortunately, this does not work so well. There are too many photographers and the plot
+is impossible to read. To fix this, we can create a new variable that "lumps" together
+photographers that did not take a large number of photographs. Here's the code:
+
+```{r}
+photos %>%                                   # built a plot from the photos data
+  mutate(                                    # create a new variable 'p_new' that
+    p_new = fct_lump(photographer, n = 16)   #   collapses all but the 16 photographers
+  ) %>%                                      #   into a category called 'other'
+  ggplot(aes(x = p_new)) +                   # this says: start a plot with 'p_new' on the x-axis
+    geom_bar()                               # what kind of plot? a bar plot!
+```
+
+Starting to look better, but the labels are still too hard to read. We can fix this by
+putting them on the y-axis instead of the x-axis:
+
+```{r}
+photos %>%                                   # built a plot from the photos data
+  mutate(                                    # create a new variable 'p_new' that
+    p_new = fct_lump(photographer, n = 16)   #   collapses all but the 16 photographers
+  ) %>%                                      #   into a category called 'other'
+  ggplot(aes(y = p_new)) +                   # this says: start a plot with 'p_new' on the y-axis
+    geom_bar()                               # what kind of plot? a bar plot!
+```
+
+Great! Now we can actually read the plot and start the understand the data. It might
+be better though to order to photographers by how many photographs the took. To do
+this, we add another layer into the code that uses the function `fct_infreq`.
+
+```{r}
+photos %>%                                   # built a plot from the photos data
+  mutate(                                    # create a new variable 'p_new' that
+    p_new = fct_lump(photographer, n = 16)   #   collapses all but the 16 photographers
+  ) %>%                                      #   into a category called 'other'
+  mutate(p_new = fct_infreq(p_new)) %>%      # order the categories by frequency
+  ggplot(aes(y = p_new)) +                   # this says: start a plot with 'p_new' on the y-axis
+    geom_bar()                               # what kind of plot? a bar plot!
+```
+
+And as a final touch, we will get rid the "Other" and NA (missing) categories:
+
+```{r}
+photos %>%                                   # built a plot from the photos data
+  mutate(                                    # create a new variable 'p_new' that
+    p_new = fct_lump(photographer, n = 16)   #   collapses all but the 16 photographers
+  ) %>%                                      #   into a category called 'other'
+  mutate(p_new = fct_infreq(p_new)) %>%      # order the categories by frequency
+  filter(!is.na(p_new)) %>%                  # removing missing photographer names
+  filter(p_new != "Other") %>%               # remove the other category
+  ggplot(aes(y = p_new)) +                   # this says: start a plot with 'p_new' on the y-axis
+    geom_bar()                               # what kind of plot? a bar plot!
+```
+
+That looks good already for EDA. If we want to create a plot for publication, we
+can add a few additional tweaks to make it look even better:
+
+```{r}
+photos %>%                                    # built a plot from the photos data
+  mutate(                                     # create a new variable 'p_new' that
+    p_new = fct_lump(photographer, n = 16)    #   collapses all but the 16 photographers
+  ) %>%                                       #   into a category called 'other'
+  mutate(p_new = fct_infreq(p_new)) %>%       # order the categories by frequency
+  mutate(p_new = fct_rev(p_new)) %>%          # put photographer with most photos at the top
+  filter(!is.na(p_new)) %>%                   # removing missing photographer names
+  filter(p_new != "Other") %>%                # remove the other category
+  ggplot(aes(y = p_new)) +                    # this says: start a plot with 'p_new' on the y-axis
+    geom_bar(                                 # what kind of plot? a bar plot!
+      fill = "white", color = "black"         #    with bars that are black outlines
+    ) +                                       #    around a white center
+    labs(                                     # labels for the plot
+        x = "Number of Photographs",
+        y = "Photographer",
+        title = "Number of Digitzed Photographs Taken by FSA-OWI Photographers",
+        caption = "Source: [photogrammar.org]"
+     )
+```
+
+### Scatter Plots
+
+Let's look at a few other plot types. For example, what if we want to look
+at a count of two different varaibles? For this we might use a scatter plot,
+also known as a "point" plot. Here's some code that tries to see the relationship
+between year and month:
+
+```{r, warning=FALSE}
+photos %>%                     # built a plot from the photos data
+  ggplot(aes(year, month)) +   # plot with 'year' on the x-axis and 'month' on y-axis
+    geom_point()               # what kind of plot? a point plot!
+```
+
+As with our bar plot, the first pass does not look like much. All of the duplicate
+points are stacked on one another and we cannot see any pattern. Let's change the
+plot type to a count plot to fix this:
+
+```{r, warning=FALSE}
+photos %>%                          # built a plot from the photos data
+  ggplot(aes(year, month)) +        # plot with 'year' on the x-axis and 'month' on y-axis
+    geom_count() +                  # what kind of plot? a count plot!
+    scale_size_area(max_size = 10)  # adjust the scale of the sizes
+```
+
+Much better! A remaining issue is that the axis scales are a bit off because
+R thinks of year and month as continuous and not categorical. We can adjust
+this with some preprocessing code:
+
+```{r}
+photos %>%                                  # built a plot from the photos data
+  filter(!is.na(year), !is.na(month)) %>%   # removing missing values
+  mutate(year = factor(year)) %>%           # make 'year' a categorical variable
+  mutate(month = factor(month)) %>%         # make 'month' a categorical variable
+  ggplot(aes(year, month)) +                # plot with 'year' on the x-axis and 'month' on y-axis
+    geom_count() +                          # what kind of plot? a count plot!
+    scale_size_area(max_size = 10)          # adjust the scale of the sizes
+```
+
+Or, perhaps even better, we can replace the numeric month with the month name:
+
+```{r}
+photos %>%                                 # built a plot from the photos data
+  filter(!is.na(year), !is.na(month)) %>%  # removing missing values
+  mutate(year = factor(year)) %>%          # make 'year' a categorical variable
+  mutate(                                  #
+    month = fct_inorder(month.abb[month])  # match 'month' with abbreviations
+  ) %>%                                    #
+  ggplot(aes(year, month)) +               # plot with 'year' on the x-axis and 'month' on y-axis
+    geom_count() +                         # what kind of plot? a count plot!
+    scale_size_area(max_size = 10)         # adjust the scale of the sizes
+```
+
+While not a focus of one of our topics today, R does have extensive support for plotting
+dates as formal time series. Using the `make_date` function, we can show the number of
+photographs taken in each month as a single plot:
+
+```{r}
+photos %>%                                         # built a plot from the photos data
+  filter(!is.na(year), !is.na(month)) %>%          # removing missing values
+  mutate(dt = make_date(year, month)) %>%          # make a date-time object
+  group_by(dt) %>%                                 # group the data by photographer and date-time  
+  summarize(n = n()) %>%                           # for each date-time, count number of photos
+  ggplot(aes(dt, n)) +                             # plot with 'dt' on the x-axis and 'n' on y-axis
+    geom_line()                                    # what kind of plot? a line plot!
+```
+
+### Adding Colors and Groups
+
+A powerful feature of R graphics is that we can easily split a single plot
+into groups by another feature (color, shape, size, ect.) accoring to
+another variable.
+
+```{r}
+photos %>%                                         # built a plot from the photos data
+  mutate(                                          # create a new variable 'p_new' that
+    p_new = fct_lump(photographer, n = 10)         #   collapses all but the 5 photographers
+  ) %>%                                            #   into a category called 'other'
+  filter(!is.na(p_new)) %>%                        # removing missing photographer names
+  filter(p_new != "Other") %>%                     # remove the other category
+  filter(!is.na(year), !is.na(month)) %>%          # removing missing values
+  mutate(year = make_date(year)) %>%               # make a date-time object
+  group_by(p_new, year) %>%                        # group the data by photographer and date-time  
+  summarize(n = n()) %>%                           # for each date-time, count number of photos
+  ggplot(aes(year, n)) +                           # plot with 'year_month' on the x-axis and 'n' on y-axis
+    geom_line(aes(color = p_new))                  # what kind of plot? a line plot! also, color by 'pnew'
+```
+
+### A Simple Spatial Plot
+
+Finally, before getting to more formal spatial analysis later today, let's see how
+we can use R graphics to plot the spatial component of the data. For example, a
+simple map can be made as a scatter plot:
+
+```{r, warning=FALSE}
+photos %>%                                # built a plot from the photos data
+  ggplot(aes(lon, lat)) +                 # plot with 'lon' on the x-axis and 'lat' on y-axis
+    geom_point()                          # what kind of plot? a scatter plot!
+```
+
+The points in Alaska, Hawaii, Puerto Rico, and the Virgin Islands make the plot a bit hard to
+see. Let's remove those for now.
+
+```{r, warning=FALSE}
+photos %>%                                                # built a plot from the photos data
+  filter(between(lon, -150, 0), between(lat, 24,50)) %>%  # restrict the longitude and latitude
+  ggplot(aes(lon, lat)) +                                 # plot with 'lon' on the x-axis and 'lat' on y-axis
+    geom_point()                                          # what kind of plot? a scatter plot!
+```
+
+Seeing where photographs were taken is interesting, but perhaps we want to weight locations
+based on the number of photos. We can do that by switching to a count plot. Also, black is a
+bit boring, so we'll use a different color and make the points transparent:
+
+```{r}
+photos %>%                                                # built a plot from the photos data
+  filter(between(lon, -150, 0), between(lat, 24,50)) %>%  # restrict the longitude and latitude
+  ggplot(aes(lon, lat)) +                                 # plot with 'lon' on the x-axis and 'lat' on y-axis
+    geom_count(                                           # what kind of plot? a count plot!
+      color = "olivedrab",                                # color the points in a dark green color
+      alpha = 0.2,                                        # make them transparent
+      show.legend = FALSE                                 # and don't show a legend (to save room)
+    ) +
+    scale_size_area(max_size = 20) +                      # fix the scales to be proportional to area
+    theme_void()                                          # remove all the cluter to focus on the data
+```
+
+We can learn a lot about the data from small modifications to this plot. For example,
+what if we only take photos from a single photographer? We could discover where they
+took photos relative to the other photographers. Here's a plot showing the route of
+John Vachon:
+
+```{r}
+photos %>%                                                # built a plot from the photos data
+  filter(between(lon, -150, 0), between(lat, 24,50)) %>%  # restrict the longitude and latitude
+  filter(photographer == "John Vachon") %>%               # only take a single photographer
+  ggplot(aes(lon, lat)) +                                 # plot with 'lon' on the x-axis and 'lat' on y-axis
+    geom_count(                                           # what kind of plot? a count plot!
+      color = "olivedrab",                                # color the points in a dark green color
+      alpha = 0.2,                                        # make them transparent
+      show.legend = FALSE                                 # and don't show a legend (to save room)
+    ) +
+    scale_size_area(max_size = 20) +                      # fix the scales to be proportional to area
+    theme_void()                                          # remove all the cluter to focus on the data
+```
+
+Because Vachon did not take photos everywhere, it's a bit harder to see exactly where all
+the points would line up on a map. We will see a way of fixing this in a following set of
+notes.
+
+### On Your Own
+
+Pick a different photographer (use the earlier plots to determine some good candidates)
+and create a similar plot to the one we created with John Vachon. Feel free to choose a
+different color for the points (see http://www.stat.columbia.edu/~tzheng/files/Rcolor.pdf
+for available color names; hex codes work too).
+
+```{r}
+
+```
+
+For an added challenge, try to filter your plot by a specific range of years.

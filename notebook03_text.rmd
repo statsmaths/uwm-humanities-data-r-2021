@@ -1,0 +1,185 @@
+---
+title: "Notebook 03: Text Analysis"
+author: "Taylor Arnold and Lauren Tilton"
+---
+
+```{r, message = FALSE}
+library(readr)               # read and write in the datasets
+library(ggplot2)             # plotting library
+library(dplyr)               # apply database-like commands
+library(forcats)             # manipulate categorical variables
+library(lubridate)           # work with dates and times
+library(ggrepel)             # fancy graph labels
+library(cleanNLP)            # process free-form text
+library(stringi)             # manipulate strings
+source("src/funs.R")         # custom helper functions
+
+theme_set(theme_minimal())   # set a minimal plot as the default
+options(
+  dplyr.summarise.inform = FALSE,    # some additional options to reduce the
+  readr.show_col_types = FALSE       # noise of some of the functions
+)
+```
+
+## Processing Text
+
+### Creating the Corpus
+
+In this notebook, we will see several examples of how to use R to perform
+analysis of textual data. As an example dataset, we will again use the
+metadata from the FSA-OWI, by looking at the photograph captions. Start by
+loading the photographic data back into R:
+
+```{r, message = FALSE}
+photos <- read_csv("data/photo_metadata_20200707.csv")    # read in the data
+```
+
+A subset of the corpus (specifically, all of the negatives that were printed)
+are assigned to a hierarchical classification system designed by Paul Vanderbilt
+in the 1940s. This system first groups photos into 9 high-level categories, such
+as "Social and Personal Activity" and "Transportation". Each of these are further
+subdivided twice. For our textual corpus we will collapse all of the captions
+within a specific category, after removing duplicates, into a single description
+of each category. We will then look at the words that describe each of the
+categories and see how the categories relate to one another.
+
+```{r}
+topics <- photos %>%                                # create a topics dataset from the photos data
+  filter(!is.na(v1), !is.na(v2), !is.na(v3)) %>%    # only include photos with Vanderbilt classifications
+  filter(!is.na(caption)) %>%                       # only include photos with captions
+  filter(!duplicated(caption)) %>%                  # some captions repeat; remove these
+  group_by(v1, v2, v3) %>%                          # group the data by classification code
+  summarize(                                        # create a variable for each classification code
+    text = stri_paste(caption, collapse = " "),     # glue together the captions for photos in the same group
+    n = n()                                         # count the number of photos in each category
+  ) %>%
+  ungroup() %>%                                     # remove extra groups
+  filter(n > 100) %>%                               # only include groups with a large number of photos
+  mutate(doc_id = v3) %>%                           # the code uses 'doc_id' as an identifier
+  filter(!duplicated(doc_id))                       # a few v3 codes repeat; remove for simplicity
+
+topics                                              # look at the dataset
+```
+
+### Tokenization
+
+Typically the first step in doing text analysis is to break the text up into
+individual words. This creates a new dataset with one row for each "token"
+(tokens is a linguistic term that includes words as well as punctuation marks).
+
+```{r}
+tokens <- read_rds("data/photo_topic_tokens.rds")        # read the data
+tokens                                                   # look at the output
+```
+
+There are fancier ways of doing the tokenization that include the ability to detect
+parts of speech, word forms, and sentence structures. For this short introduction,
+the method used here will suffice. Notice that reading the token column down
+recreates the original text. We will primarily work with the column "lemma", which
+converts all of the words to lowercase.
+
+To see what kinds of analysis are enabled by the tokens, let's count the number of
+times the words "farm", "he", and "she" are used the captions.
+
+```{r}
+words <- tokens %>%                       # create words data with the tokens data
+  group_by(doc_id) %>%                    # organize by topic
+  summarize(                   
+    farm = mean(lemma == "farm") * 1000,  # how often does 'farm' appear per 1000 words?
+    he = mean(lemma == "he") * 1000,      # how often does 'he' appear per 1000 words?
+    she = mean(lemma == "she") * 1000     # how often does 'she' appear per 1000 words?
+  )
+
+words                                     # print the output
+```
+
+Do you see any patterns that follow your intuition? We can further explore the data
+by using the visualization techniques covered in the previous notebook. Let's show
+a scatterplot of how often texts use "he" versus "she".
+
+```{r}
+words %>%                                               # plot the words data
+  ggplot(aes(x = he, y = she)) +                        # he frequency on x-axis and she on y-axis
+    geom_point(alpha = 0.2) +                           # what kind of plot? points!
+    geom_text_repel(         
+      aes(label = doc_id),                              # also add labels
+      data = filter(                                    # but only for some of the data
+        words,                                          # specifically, words
+        (she > max(she) * 0.2) | (he > max(he) * 0.6)   # where 'she' or 'he' frequency is high
+      )
+    )
+```
+
+Notice anything surprising? Interesting? Do this mostly follow your intuition about what the
+corpus would look like?
+
+### Term Frequency-Inverse Document Frequency
+
+Above we selected the words of interest, but often we want the text itself to indicate which
+terms are the most interesting. Using raw counts does not work well because boring words such
+as "and" and "the" float to the top. Instead, a common method is used to describe how important
+a word is to a specific item in our collection of texts. This values is called the
+Term Frequency-Inverse Document Frequency (TF-IDF). To compute this score, we will use the
+function sm_text_tfidf:
+
+```{r}
+tfidf <- tokens %>%                                           # take the tokens data and create tfidf data
+  sm_text_tfidf(token_var = "lemma", min_df = 0, max_df = 1)  # compute TF-IDF score; include all terms
+
+tfidf                                                         # show the dataset
+```
+
+Notice that the token "1" only appears once in the first document, but has a higher tfidf
+score (1.827) than the comma (0.000), which appears 700 times, because the latter occurs in
+every document. One useful thing that we can do with the TF-IDF scores is extract the words
+with the highest scores from each document. The code below does this for each topic.
+
+```{r}
+tfidf %>%                                       # start with tfidf data
+  group_by(doc_id) %>%                          # group by document
+  arrange(desc(tfidf)) %>%                      # sort by tfidf score, largest to smallest
+  slice(1:8) %>%                                # take the top 8 words in each group
+  summarize(sm_paste(token)) %>%                # glue these words together
+  mutate(                          
+    token_paste = stri_sub(token_paste, 1, 60)  # truncate the lists so they display in the window
+  )
+```
+
+Take a moment to look at a few of the topics. Most of the terms should confirm that the method
+works well, but many also provide additional insight into what specifically each topic is
+about.
+
+### Document Distances and Nearest Neighbors
+
+We can also use the TF-IDF scores to determine which topics are closest to one another.
+We can say that two topics are close if the TF-IDF scores are close to one another.
+Typically we use a measurement called angle distance to account for the fact that some
+texts are longer than others. Let's use this distance metric to determine, for each
+topic, which other topic it is closest to.
+
+```{r}
+tokens %>%                                   # start with the tokens data
+  cnlp_utils_tfidf(token_var = "lemma") %>%  # compute the tfidf scores
+  sm_tidy_angle_distance() %>%               # compute distances between documents
+  filter(document1 < document2) %>%          # distances appear twice; remove these
+  group_by(document1) %>%                    # group by the first document
+  arrange(distance) %>%                      # sort by distances
+  slice_head(n = 1) %>%                      # take closest document
+  ungroup() %>%                              # remove grouping
+  arrange(distance)                          # order by overall distance
+```
+
+We will further explore the structure of the topics in the following notebook.
+
+### On Your Own
+
+Create a new version of the words dataset by selecting two other words that you think
+might be interesting to explore. Draw scatter plot of the results as above that shows
+topics with extreme values.
+
+```{r}
+
+```
+
+See if you can explain some of the resulting patterns. If the plot is uninteresting, try
+with a different set of words.

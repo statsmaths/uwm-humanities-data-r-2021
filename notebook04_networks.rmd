@@ -1,0 +1,174 @@
+---
+title: "Notebook 04: Network Analysis"
+author: "Taylor Arnold and Lauren Tilton"
+---
+
+```{r, message = FALSE}
+library(readr)               # read and write in the datasets
+library(ggplot2)             # plotting library
+library(dplyr)               # apply database-like commands
+library(forcats)             # manipulate categorical variables
+library(lubridate)           # work with dates and times
+library(ggrepel)             # fancy graph labels
+library(cleanNLP)            # process free-form text
+library(stringi)             # manipulate strings
+library(magrittr)            # fancy pipes (e.g., %>%)
+library(igraph)              # for networks
+source("src/funs.R")         # custom helper functions
+
+theme_set(theme_minimal())   # set a minimal plot as the default
+options(
+  dplyr.summarise.inform = FALSE,    # some additional options to reduce the
+  readr.show_col_types = FALSE       # noise of some of the functions
+)
+```
+
+## Network data
+
+### Document Distances
+
+For this notebook we will be exploring the distance-based relationships
+between topics in the FSA-OWI corpus that we started creating in the
+previous notebook. To start, let's re-create the tokens dataset that
+we had previously.
+
+```{r, message = FALSE}
+photos <- read_csv("data/photo_metadata_20200707.csv")  # read in the dataset
+
+topics <- photos %>%                                # create a topics dataset from the photos data
+  filter(!is.na(v1), !is.na(v2), !is.na(v3)) %>%    # only include photos with Vanderbilt classifications
+  filter(!is.na(caption)) %>%                       # only include photos with captions
+  filter(!duplicated(caption)) %>%                  # some captions repeat; remove these
+  group_by(v1, v2, v3) %>%                          # group the data by classification code
+  summarize(                                        # create a variable for each classification code
+    text = stri_paste(caption, collapse = " "),     # glue together the captions for photos in the same group
+    n = n()                                         # count the number of photos in each category
+  ) %>%
+  ungroup() %>%                                     # remove extra groups
+  filter(n > 100) %>%                               # only include groups with a large number of photos
+  mutate(doc_id = v3) %>%                           # the code uses 'doc_id' as an identifier
+  filter(!duplicated(doc_id))                       # a few v3 codes repeat; remove for simplicity
+
+tokens <- read_rds("data/photo_topic_tokens.rds")        # read the tokens data
+```
+
+Similar to the previous notebook, we will use the angle distance to describe which
+topics are close to one another. This time, we will link the 400 pairs of topics
+that are closest to one another.
+
+```{r, message = FALSE}
+edges <- tokens %>%                          # create edges data from the tokens data
+  cnlp_utils_tfidf(token_var = "lemma") %>%  # compute the tfidf scores
+  sm_tidy_angle_distance() %>%               # compute distances between documents
+  filter(document1 < document2) %>%          # distances appear twice; remove these
+  group_by(document1) %>%                    # group by the first document
+  arrange(distance) %>%                      # sort by distances
+  ungroup() %>%                              # remove grouping
+  slice_head(n = 250) %>%                    # take closest document
+  arrange(distance)                          # order by overall distance
+
+edges  # show the dataset
+```
+
+### Plotting a Network
+
+We now need to supply this data to an R function that creates information about
+the data as a network.
+
+```{r}
+graph <- sm_graph_layout(edges)      # create network data
+node <- graph$node                   # save information about the nodes
+edge <- graph$edge                   # save information about the edges
+node                                 # print nodes data
+```
+
+In the output nodes dataset, each topic is filled in with network-based metrics.
+There is also information about how to plot the topics in a way that mirrors the
+network structure. Here is how we can use the code to plot the network.
+
+```{r}
+node %>%                                      # plot the nodes
+  ggplot(aes(x, y)) +                         # x is in the x-axis and y on the y-axis
+    geom_point() +                            # create points
+    geom_segment(                             # also add segments
+      aes(xend = xend, yend = yend),          # use 'xend' and 'yend' to define the lines
+      data = edge,                            # use edge data for the edges
+      alpha = 0.1                             # make them transparent
+    ) +
+    theme_void()                              # no need for axes
+```
+
+### Network Centrality
+
+We can use this network to visualize the various graph metrics. For example, here is
+a visualization of the "eigenvalue centrality score", a way of measuring how central
+a node is to the rest of the network.
+
+```{r}
+node %>%                                        # plot the nodes
+  ggplot(aes(x, y)) +                           # x is in the x-axis and y on the y-axis
+    geom_segment(                               # also add segments
+      aes(xend = xend, yend = yend),            # use 'xend' and 'yend' to define the lines
+      data = edge,                              # use edge data for the edges
+      alpha = 0.1                               # make them transparent
+    ) +
+    geom_point(aes(color = eigen), size = 3) +  # create points; color by eigenvalue score
+    scale_color_binned(
+      type = "viridis", n.breaks = 15           # specify color scale to use
+    ) +
+    theme_void()                                # no need for axes
+```
+
+Which topics are at the most centrality according to this score? Let's see:
+
+```{r}
+node %>%                        # start with the nodes data
+  filter(component == 1) %>%    # only take nodes in the main component of the graph
+  arrange(desc(eigen))          # order by eigenvalue score, in descending order
+```
+
+Many of these topics have something to do with generic people or farms. Why might
+this be given the corpus?
+
+### Clusters
+
+We can also use the network structure to detect clusters of topics. First, can
+visualize these on the network itself.
+
+```{r}
+node %>%                                         # plot the nodes
+  ggplot(aes(x, y)) +                            # x is in the x-axis and y on the y-axis
+    geom_segment(                                # also add segments
+      aes(xend = xend, yend = yend),             # use 'xend' and 'yend' to define the lines
+      data = edge,                               # use edge data for the edges
+      alpha = 0.1                                # make them transparent
+    ) +
+    geom_point(aes(color = cluster), size = 3) + # create points; color by cluster
+    theme_void()                                # no need for axes
+```
+
+More usefully, we can see what topics are grouped together.
+
+```{r}
+node %>%                                # start with the nodes data
+  filter(component %in% 1) %>%          # only include the connected component
+  group_by(cluster) %>%                 # group by cluster
+  summarize(sm_paste(id), n = n()) %>%  # paste together the document names
+  arrange(desc(n)) %>%                  # arrange by cluster size
+  use_series("id_paste") %>%            # select the variable of interest
+  as.character()                        # convert to a character type
+```
+
+How well does this method lump together topics in a logical way?
+
+### On Your Own
+
+Recreate the plot we created above of the eigenvalue centrality scores, but use the
+between score instead.
+
+```{r}
+
+```
+
+Betweeness is a bit different than eigenvalue centrality. How would you describe the
+plot compared to the eigenvalue centrality?
